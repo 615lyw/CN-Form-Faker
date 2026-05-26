@@ -128,6 +128,15 @@
     return Boolean(event.altKey || isLeftAltPressed);
   }
 
+  // 阻止 Alt 快捷填充的原始鼠标事件继续触发页面自身的双击/弹窗逻辑。
+  function suppressShortcutEvent(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") {
+      event.stopImmediatePropagation();
+    }
+  }
+
   // 执行快捷键单字段填充，并抑制短时间内 mousedown 与 dblclick 的重复触发。
   function fillShortcutTarget(target, event) {
     if (!target || (!isFillable(target) && !isCustomSelect(target))) {
@@ -136,18 +145,23 @@
 
     const now = Date.now();
     if (lastShortcutFillTarget === target && now - lastShortcutFillAt < 600) {
-      event.preventDefault();
-      event.stopPropagation();
+      suppressShortcutEvent(event);
       return true;
     }
 
     lastShortcutFillTarget = target;
     lastShortcutFillAt = now;
-    event.preventDefault();
-    event.stopPropagation();
-    fillElement(target, { overwrite: true }).catch((error) => {
-      console.warn("Alt double-click fake data fill failed:", error);
-    });
+    suppressShortcutEvent(event);
+    const startFill = () => {
+      fillElement(target, { overwrite: true }).catch((error) => {
+        console.warn("Alt double-click fake data fill failed:", error);
+      });
+    };
+    if (isAntDatePickerInput(target)) {
+      window.setTimeout(startFill, 80);
+    } else {
+      startFill();
+    }
     return true;
   }
 
@@ -174,6 +188,21 @@
 
       lastAltClickTarget = target;
       lastAltClickAt = now;
+    },
+    true
+  );
+
+  // DatePicker 对连续点击较敏感，拦截 Alt+click，避免页面组件把快捷点击当作关闭弹窗的交互。
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!isAltFillMouseEvent(event)) {
+        return;
+      }
+      const target = resolveFillTarget(event.target, false);
+      if (isAntDatePickerInput(target)) {
+        suppressShortcutEvent(event);
+      }
     },
     true
   );
@@ -538,12 +567,12 @@
 
   // 判断文本是否表示证件或业务有效期的开始日期字段。
   function isStartValidityText(text) {
-    return /起始有效期|证件起始|begindate|startdate/i.test(text);
+    return /起始有效期|证件起始|起始日期|开始日期|开始时间|生效日期|发证日期|begindate|startdate/i.test(text);
   }
 
   // 判断文本是否表示证件或业务有效期的结束日期字段。
   function isEndValidityText(text) {
-    return /证件有效期|有效期|validdate|enddate|expiredate|expirydate|expirationdate/i.test(text);
+    return /证件有效期|有效期|截止日期|截止时间|到期|失效日期|结束日期|结束时间|validdate|enddate|expiredate|expirydate|expirationdate/i.test(text);
   }
 
   // 根据字段语义生成更合理的日期，例如开始日期早于今天、结束日期晚于今天。
@@ -557,14 +586,6 @@
     today.setHours(0, 0, 0, 0);
 
     if (isStartValidityText(text)) {
-      return formatDate(addDays(today, -1));
-    }
-
-    if (isEndValidityText(text)) {
-      return formatDate(addYears(today, 1));
-    }
-
-    if (/起始有效期|起始日期|开始日期|开始时间|生效日期|发证日期/.test(text)) {
       const latest = new Date(today);
       latest.setDate(latest.getDate() - 1);
       const earliest = new Date(today);
@@ -572,7 +593,7 @@
       return formatDate(randomDateBetween(earliest, latest));
     }
 
-    if (/有效期|截止日期|截止时间|到期|失效日期|结束日期|结束时间/.test(text)) {
+    if (isEndValidityText(text)) {
       const earliest = new Date(today);
       earliest.setDate(earliest.getDate() + 30);
       const latest = new Date(today);
@@ -816,13 +837,45 @@
     return (to.getFullYear() - from.getFullYear()) * 12 + to.getMonth() - from.getMonth();
   }
 
-  // 获取当前可见的 Ant Design 日期面板。
-  function getVisibleAntCalendar() {
-    return (
-      Array.from(document.querySelectorAll(".ant-calendar-picker-container"))
-        .filter((calendar) => isVisible(calendar) && !calendar.classList.contains("ant-calendar-picker-container-hidden"))
-        .at(-1) || null
+  // 计算日期面板与当前日期输入框的距离，用于多个面板同时存在时挑选正确面板。
+  function getAntCalendarDistance(anchor, calendar) {
+    const picker = anchor.closest(".ant-calendar-picker") || anchor;
+    const pickerRect = picker.getBoundingClientRect();
+    const calendarRect = calendar.getBoundingClientRect();
+    const horizontalGap =
+      calendarRect.right < pickerRect.left
+        ? pickerRect.left - calendarRect.right
+        : pickerRect.right < calendarRect.left
+          ? calendarRect.left - pickerRect.right
+          : 0;
+    const verticalGap =
+      calendarRect.bottom < pickerRect.top
+        ? pickerRect.top - calendarRect.bottom
+        : pickerRect.bottom < calendarRect.top
+          ? calendarRect.top - pickerRect.bottom
+          : 0;
+
+    return horizontalGap * 2 + verticalGap;
+  }
+
+  // 获取当前可见的 Ant Design 日期面板；有锚点时优先选择靠近当前输入框的面板。
+  function getVisibleAntCalendar(anchor) {
+    const calendars = Array.from(document.querySelectorAll(".ant-calendar-picker-container")).filter(
+      (calendar) => isVisible(calendar) && !calendar.classList.contains("ant-calendar-picker-container-hidden")
     );
+    if (!calendars.length) {
+      return null;
+    }
+    if (!(anchor instanceof Element)) {
+      return calendars.at(-1);
+    }
+    return calendars
+      .map((calendar, index) => ({
+        calendar,
+        index,
+        distance: getAntCalendarDistance(anchor, calendar),
+      }))
+      .sort((left, right) => left.distance - right.distance || right.index - left.index)[0].calendar;
   }
 
   // 获取日期面板中当前月份的可用日期单元格。
@@ -906,68 +959,6 @@
     return exactCell || usableCells[0] || null;
   }
 
-  // 等待日期输入框的值连续稳定，避免组件还在异步更新时过早判断成功。
-  async function waitForStableDatePickerValue(element, expectedValue, timeout = 1800) {
-    const startedAt = Date.now();
-    let lastValue = "";
-    let stableCount = 0;
-
-    while (Date.now() - startedAt < timeout) {
-      const currentValue = String(element.value || "").trim();
-      const matchesExpected = !expectedValue || currentValue === expectedValue;
-
-      if (currentValue && matchesExpected) {
-        if (currentValue === lastValue) {
-          stableCount += 1;
-        } else {
-          lastValue = currentValue;
-          stableCount = 1;
-        }
-
-        if (stableCount >= 3) {
-          return true;
-        }
-      } else {
-        lastValue = "";
-        stableCount = 0;
-      }
-
-      await delay(120);
-    }
-
-    return false;
-  }
-
-  // 判断日期字段所在的 Ant Design 表单项是否仍处于校验错误状态。
-  function hasAntFormError(element) {
-    const formItem = element.closest(".ant-form-item, .form-item, .form-field, .form-row, .form-group");
-    if (!formItem) {
-      return false;
-    }
-
-    const hasErrorClass =
-      formItem.classList.contains("has-error") ||
-      formItem.classList.contains("ant-form-item-has-error") ||
-      Boolean(formItem.querySelector(".has-error, .ant-form-item-has-error"));
-    const errorNode = formItem.querySelector(".ant-form-explain, .ant-form-item-explain-error");
-    const hasVisibleErrorText = Boolean(errorNode && isVisible(errorNode) && errorNode.textContent.trim());
-
-    return hasErrorClass || hasVisibleErrorText;
-  }
-
-  // 二次确认 DatePicker 是否已经稳定写入，并且通过当前表单项校验。
-  async function confirmAntDatePickerValue(element, expectedValue) {
-    dispatchAntDatePickerEvents(element);
-
-    const hasStableValue = await waitForStableDatePickerValue(element, expectedValue);
-    if (!hasStableValue) {
-      return false;
-    }
-
-    await delay(250);
-    return !hasAntFormError(element);
-  }
-
   // 打开 Ant Design DatePicker 并点击日历日期，模拟真实用户选择日期。
   async function selectAntDatePickerDate(element, value) {
     const picker = element.closest(".ant-calendar-picker") || element;
@@ -980,8 +971,9 @@
     }
     clickElement(picker);
     clickElement(element);
+    await delay(80);
 
-    const calendar = await waitForValue(getVisibleAntCalendar, asyncSelectTimeout);
+    const calendar = await waitForValue(() => getVisibleAntCalendar(element), asyncSelectTimeout);
     if (!calendar) {
       return { selected: false, value };
     }
@@ -1002,8 +994,7 @@
       await delay(120);
     }
 
-    const confirmed = await confirmAntDatePickerValue(element, pickedValue);
-    return { selected: confirmed, value: pickedValue };
+    return { selected: true, value: pickedValue };
   }
 
   // 聚焦并点击自定义选择器的触发区域，打开下拉面板。
@@ -1163,10 +1154,6 @@
       }
       setNativeValue(element, value);
       dispatchAntDatePickerEvents(element);
-      const confirmed = await confirmAntDatePickerValue(element, value);
-      if (!confirmed) {
-        return { filled: false, reason: "date-not-validated", type: inferredType, value };
-      }
       highlight(element.closest(".ant-calendar-picker") || element);
       return { filled: true, type: inferredType, value };
     }
@@ -1272,6 +1259,11 @@
     return Boolean(result && result.filled && (isCustomSelect(element) || element instanceof HTMLSelectElement));
   }
 
+  // 判断字段是否属于必须优先处理的选择类控件。
+  function isSelectLikeFillable(element) {
+    return isCustomSelect(element) || element instanceof HTMLSelectElement;
+  }
+
   // 判断下拉联动完成后是否应该补填该字段。
   function shouldRepairAfterSelect(element) {
     if (isCustomSelect(element) || element instanceof HTMLSelectElement) {
@@ -1317,10 +1309,6 @@
     const results = [];
     let filledSelect = false;
     const initialCount = getFillableElements(scope).length;
-    const retryPasses = [
-      { onlyDeferred: false, optionWaitTimeout: 250, beforeDelay: 0 },
-      { onlyDeferred: true, optionWaitTimeout: 1000, beforeDelay: 500 },
-    ];
     const queueDeferredDateFill = (element, fillOptions) => {
       const unit = getProcessingUnit(element);
       if (!deferredDateFillers.has(unit)) {
@@ -1330,9 +1318,9 @@
       processedElements.add(unit);
     };
 
-    for (const pass of retryPasses) {
+    const runFillStage = async (pass) => {
       if (pass.onlyDeferred && deferredElements.size === 0) {
-        break;
+        return;
       }
       if (pass.beforeDelay) {
         await delay(pass.beforeDelay);
@@ -1351,6 +1339,9 @@
             return false;
           }
           if (pass.onlyDeferred && !deferredElements.has(unit)) {
+            return false;
+          }
+          if (!pass.accepts(element)) {
             return false;
           }
           if (!options.overwrite && !isEmpty(element)) {
@@ -1392,7 +1383,31 @@
         deferredElements.delete(unit);
         processedElements.add(unit);
       }
+    };
+
+    await runFillStage({
+      accepts: isSelectLikeFillable,
+      onlyDeferred: false,
+      optionWaitTimeout: 250,
+      beforeDelay: 0,
+    });
+    await runFillStage({
+      accepts: isSelectLikeFillable,
+      onlyDeferred: true,
+      optionWaitTimeout: 1000,
+      beforeDelay: 500,
+    });
+
+    if (filledSelect) {
+      await delay(postSelectRepairDelay);
     }
+
+    await runFillStage({
+      accepts: (element) => !isSelectLikeFillable(element),
+      onlyDeferred: false,
+      optionWaitTimeout: 250,
+      beforeDelay: 0,
+    });
 
     if (filledSelect) {
       await delay(postSelectRepairDelay);
