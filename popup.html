@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CN Form Faker</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header>
+        <span class="badge">CN</span>
+        <div>
+          <h1>CN Form Faker</h1>
+          <p>中国地区表单测试数据填充</p>
+        </div>
+      </header>
+      <section class="actions">
+        <button type="button" data-action="scope">填充当前弹窗/表单</button>
+        <button type="button" data-action="scope-overwrite">覆盖当前弹窗/表单</button>
+        <button type="button" data-action="page">填充整个页面</button>
+      </section>
+      <p id="status" role="status"></p>
+    </main>
+    <script src="./popup.js"></script>
+  </body>
+</html>

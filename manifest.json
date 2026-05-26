@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "CN Form Faker",
+  "short_name": "Form Faker CN",
+  "version": "1.0.0",
+  "description": "自动识别页面、弹窗和必填字段，填充适用于中国地区的测试数据。",
+  "permissions": ["contextMenus", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "CN Form Faker",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["fake-data.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

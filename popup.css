@@ -1,0 +1,72 @@
+:root {
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", Arial, sans-serif;
+  color: #17202a;
+  background: #ffffff;
+}
+
+body {
+  margin: 0;
+  min-width: 280px;
+}
+
+.popup {
+  padding: 14px;
+}
+
+header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.badge {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #1f7a6d;
+  font-weight: 800;
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+p {
+  margin: 3px 0 0;
+  color: #607080;
+  font-size: 12px;
+}
+
+.actions {
+  display: grid;
+  gap: 8px;
+}
+
+button {
+  min-height: 38px;
+  border: 1px solid #d5dee8;
+  border-radius: 6px;
+  color: #1f2a37;
+  background: #f7fafc;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #1f7a6d;
+}
+
+#status {
+  min-height: 18px;
+  margin-top: 10px;
+  color: #0f766e;
+}
+
